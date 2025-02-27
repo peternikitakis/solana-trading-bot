@@ -1,18 +1,31 @@
 import dotenv from "dotenv";
-import { trackTransactions } from "./tracker.js";
+import { startTracker } from "./tracker.js";
+import { Connection } from "@solana/web3.js";
+import { config } from "./config.js"; // Import config for Helius RPC URLs
+console.log(`🌟 Bot Initializing | Solana Trading Bot`);
 dotenv.config();
-console.log("🔍 HELIUS_RPC_WS_URL:", process.env.HELIUS_RPC_WS_URL || "❌ Not loaded!");
-console.log("🔍 HELIUS_API_KEY:", process.env.HELIUS_API_KEY || "❌ Not loaded!");
-console.log("🔍 WALLET_TO_TRACK:", process.env.WALLET_TO_TRACK || "❌ Not loaded!");
-const WS_URL = process.env.HELIUS_RPC_WS_URL;
-if (!WS_URL) {
-    console.error("❌ WebSocket URL is undefined! Check your .env file.");
+console.log(`🔧 Env Loaded      | Status: ${!!process.env.HELIUS_API_KEY ? "Active" : "Inactive"}`);
+const { HELIUS_API_KEY, WALLET_TO_TRACK } = process.env;
+console.log(`🔑 API Key Check   | ${HELIUS_API_KEY ? "✅ Loaded" : "❌ Missing"}`);
+console.log(`👛 Wallet Check    | ${WALLET_TO_TRACK ? `✅ ${WALLET_TO_TRACK}` : "❌ Missing"}`);
+if (!HELIUS_API_KEY || !WALLET_TO_TRACK) {
+    console.error(`❌ Config Error    | Missing required environment variables! Check .env`);
     process.exit(1);
 }
-const WALLET_TO_TRACK = process.env.WALLET_TO_TRACK;
-if (!WALLET_TO_TRACK) {
-    console.error("❌ No wallet address provided! Check your .env file.");
+console.log(`🚀 Bot Launching   | Tracking Wallet: ${WALLET_TO_TRACK}`);
+// Initialize connection globally for tracker.ts (since it uses a global connection)
+const connection = new Connection(config.HELIUS_RPC_URL, {
+    commitment: "processed",
+});
+try {
+    startTracker(); // No parameter needed, as tracker.ts uses global connection
+}
+catch (error) {
+    if (error instanceof Error) {
+        console.error(`❌ Launch Failed    | Error: ${error.message}`);
+    }
+    else {
+        console.error(`❌ Launch Failed    | Unknown Error: ${error}`);
+    }
     process.exit(1);
 }
-console.log(`🚀 Starting bot to track wallet: ${WALLET_TO_TRACK}`);
-trackTransactions(WALLET_TO_TRACK);

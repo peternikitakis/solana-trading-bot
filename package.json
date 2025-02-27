@@ -13,19 +13,33 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "22": "^0.0.0",
     "@project-serum/anchor": "^0.26.0",
     "@solana/spl-token": "^0.4.12",
     "@solana/web3.js": "^1.98.0",
     "axios": "^1.7.9",
+    "body-parser": "^1.20.3",
     "bs58": "^6.0.0",
+    "cors": "^2.8.5",
     "cross-fetch": "^4.1.0",
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "pg": "^8.13.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/body-parser": "^1.19.5",
     "@types/bs58": "^4.0.4",
+    "@types/express": "^5.0.0",
+    "@types/react": "^19.0.9",
+    "@types/react-dom": "^19.0.3",
+    "autoprefixer": "^10.4.20",
+    "nodemon": "^3.1.9",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^4.0.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
   }

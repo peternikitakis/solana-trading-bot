@@ -1,27 +1,17 @@
 {
   "compilerOptions": {
-    /* Visit https://aka.ms/tsconfig to read more about this file */
-
-    /* Language and Environment */
-    "target": "ES6" /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */,
-
-    /* Modules */
-    "module": "NodeNext" /* ✅ Enables ES module support */,
-    "moduleResolution": "NodeNext" /* ✅ Ensures correct module resolution */,
-
-    /* Interop Constraints */
-    "esModuleInterop": true /* ✅ Fixes compatibility with CommonJS modules */,
-    "forceConsistentCasingInFileNames": true /* ✅ Ensures correct import casing */,
-
-    /* Type Checking */
-    "strict": true /* ✅ Enable all strict type-checking options */,
-
-    /* Completeness */
-    "skipLibCheck": true /* ✅ Skip type checking all .d.ts files */,
-
-    /* Paths */
-    "rootDir": "./src" /* ✅ Specifies the root folder within source files */,
-    "outDir": "./dist" /* ✅ Output compiled files to ./dist */
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "node16",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "lib": ["ES2020"] // Ensure Map and other ES2020 types are available
   },
-  "include": ["src"] /* ✅ Ensures TypeScript only compiles files in /src */
+  "include": ["src", "src/types.d.ts"],
+  "exclude": ["node_modules"]
 }
