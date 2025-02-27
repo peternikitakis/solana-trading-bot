@@ -6,18 +6,13 @@ import {
 } from "@solana/web3.js";
 import axios, { AxiosError } from "axios";
 import { Wallet } from "@project-serum/anchor";
-import dotenv from "dotenv";
+import { config } from "./config.js";
 
-dotenv.config();
-
-const RPC_URL = process.env.HELIUS_RPC_URL!;
-const JUPITER_QUOTE_API = "https://api.jup.ag/swap/v1/quote";
+const JUPITER_QUOTE_API =
+  config.JUPITER_API || "https://api.jup.ag/swap/v1/quote";
 const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1/swap";
-const SLIPPAGE_BPS = Number(process.env.SLIPPAGE_BPS) || 100; // Default 1%
-const PRIORITY_FEE_LAMPORTS =
-  Number(process.env.PRIORITY_FEE_LAMPORTS) || 1_000_000; // 0.001 SOL
-const JUPITER_API_KEY = process.env.JUPITER_API_KEY || "";
-const connection = new Connection(RPC_URL, "confirmed");
+const SLIPPAGE_BPS = 100; // 1% slippage for reliability
+const PRIORITY_FEE_LAMPORTS = 25000; // 0.000025 SOL for ~200-250ms latency
 
 function loadKeypair(): Keypair {
   try {
@@ -34,32 +29,40 @@ function loadKeypair(): Keypair {
 const walletKeypair = loadKeypair();
 const wallet = new Wallet(walletKeypair);
 
-async function getTokenBalance(tokenAddress: string): Promise<number> {
+async function getTokenBalance(
+  tokenAddress: string,
+  connection: Connection
+): Promise<number> {
   try {
+    console.log(`🔍 Current Balance Check via Jupiter for ${tokenAddress}`);
     const tokenAccounts = await connection.getTokenAccountsByOwner(
       walletKeypair.publicKey,
       { mint: new PublicKey(tokenAddress) }
     );
 
     if (tokenAccounts.value.length === 0) {
-      throw new Error("No holdings found for token: ${tokenAddress}");
+      console.log(
+        `❌ No holdings found for token: ${tokenAddress} via Jupiter`
+      );
+      return 0;
     }
 
     const balanceInfo = await connection.getTokenAccountBalance(
       tokenAccounts.value[0].pubkey
     );
-
     console.log(
-      "🔍 Current Balance for ${tokenAddress}: ${balanceInfo.value.amount} tokens"
+      `🔍 Current Balance for ${tokenAddress} via Jupiter: ${balanceInfo.value.uiAmount} tokens`
     );
     return parseInt(balanceInfo.value.amount);
   } catch (error) {
-    console.error(" Error Fetching Token Balance:", error);
-    throw new Error("Failed to get token balance.");
+    console.error(
+      `❌ Error fetching balance for ${tokenAddress} via Jupiter:`,
+      error
+    );
+    return 0;
   }
 }
 
-/** ✅ Get a Quote from Jupiter */
 async function getBestQuote(
   inputMint: string,
   outputMint: string,
@@ -67,65 +70,70 @@ async function getBestQuote(
 ) {
   try {
     console.log(
-      `🔄 Fetching best route for ${amount} ${inputMint} → ${outputMint}`
+      `🔄 Fetching best route via Jupiter for ${amount} ${inputMint} → ${outputMint}`
     );
-
-    const params = {
-      inputMint,
-      outputMint,
-      amount,
-      slippageBps: SLIPPAGE_BPS, // ✅ Only using manual slippage
-      restrictIntermediateTokens: true, // ✅ Stability
-    };
-
     const response = await axios.get(JUPITER_QUOTE_API, {
-      params,
-      headers: JUPITER_API_KEY ? { "x-api-key": JUPITER_API_KEY } : {},
+      params: {
+        inputMint,
+        outputMint,
+        amount,
+        slippageBps: SLIPPAGE_BPS,
+      },
+      headers: {}, // Remove API key headers, send unauthenticated request
     });
-
     if (
       !response.data ||
       !response.data.outAmount ||
       response.data.outAmount === "0"
     ) {
-      console.error("❌ No valid quote received.");
+      console.error("❌ No valid quote received via Jupiter.");
       return null;
     }
-
     console.log("✅ Jupiter Quote:", JSON.stringify(response.data, null, 2));
     return response.data;
   } catch (error) {
-    const axiosError = error as AxiosError; // ✅ Type assertion
     console.error(
-      "❌ Error fetching quote:",
-      axiosError.response?.data || axiosError.message
+      "❌ Error fetching quote via Jupiter:",
+      (error as AxiosError).message
     );
     return null;
   }
 }
 
-/** ✅ Execute a Swap */
+export type SwapResult = {
+  success: boolean;
+  outAmount: number; // Use number for UI amount (e.g., 26.468506)
+  signature?: string;
+  dex?: string;
+};
+
 async function executeSwap(
   inputMint: string,
   outputMint: string,
   amount: number
-): Promise<boolean> {
+): Promise<SwapResult> {
   try {
-    console.log(`🔄 Executing swap: ${amount} of ${inputMint} → ${outputMint}`);
-
+    console.log(
+      `🔄 Executing swap via Jupiter: ${amount} of ${inputMint} → ${outputMint}`
+    );
     const quoteResponse = await getBestQuote(inputMint, outputMint, amount);
     if (!quoteResponse) {
-      console.error("❌ Swap failed: No valid quote found.");
-      return false;
+      console.error("❌ Swap failed via Jupiter: No valid quote found.");
+      return { success: false, outAmount: 0 }; // Ensure outAmount is included
     }
+
+    console.log(
+      "DEBUG: Quote Response outAmount (lamports)",
+      quoteResponse.outAmount
+    ); // Log quote outAmount
 
     const swapResponse = await axios.post(
       JUPITER_SWAP_API,
       {
         quoteResponse,
         userPublicKey: wallet.publicKey.toBase58(),
-        dynamicComputeUnitLimit: true, // ✅ Estimate Compute Unit
-        dynamicSlippage: false, //
+        dynamicComputeUnitLimit: true,
+        dynamicSlippage: false,
         prioritizationFeeLamports: {
           priorityLevelWithMaxLamports: {
             maxLamports: PRIORITY_FEE_LAMPORTS,
@@ -134,103 +142,173 @@ async function executeSwap(
         },
       },
       {
-        headers: {
-          "Content-Type": "application/json",
-          ...(JUPITER_API_KEY && { "x-api-key": JUPITER_API_KEY }),
-        },
+        headers: {}, // Remove API key headers, send unauthenticated request
       }
     );
 
-    const swapData = swapResponse.data;
+    if (!swapResponse.data.swapTransaction) {
+      console.error(
+        "❌ Swap transaction creation failed via Jupiter:",
+        swapResponse.data
+      );
+      return { success: false, outAmount: 0 }; // Ensure outAmount is included
+    }
+
     console.log(
-      "✅ Swap Transaction Received:",
+      "DEBUG: Swap Response Data:",
       JSON.stringify(swapResponse.data, null, 2)
     );
 
-    if (!swapData.swapTransaction) {
-      console.error("❌ Swap transaction creation failed:", swapData);
-      return false;
-    }
+    console.log(
+      "✅ Swap Transaction Received via Jupiter:",
+      JSON.stringify(swapResponse.data, null, 2)
+    );
 
-    // Deserialize, Sign & Send Transaction
+    // Since tracker.ts uses a global connection, we’ll assume it’s available globally or pass it if needed
+    const connection = new Connection(
+      config.HELIUS_RPC_URL, // Uses your authenticated Helius RPC URL
+      { commitment: "processed" } // Fastest commitment for performance
+    );
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash("processed");
     const transaction = VersionedTransaction.deserialize(
-      Buffer.from(swapData.swapTransaction, "base64")
+      Buffer.from(swapResponse.data.swapTransaction, "base64")
     );
     transaction.sign([walletKeypair]);
 
-    const rawTransaction = transaction.serialize();
-    const signature = await connection.sendRawTransaction(rawTransaction, {
-      skipPreflight: false,
-      maxRetries: 5,
-    });
-
-    // Debug logs: Transaction ID + Solscan Link
-    console.log(`✅ Transaction Sent! Signature: ${signature}`);
-    console.log(`🔍 Track on Solscan: https://solscan.io/tx/${signature}`);
-
-    // ✅ Confirm transaction using just the signature
-    const confirmation = await connection.confirmTransaction(
-      signature,
-      "finalized"
+    const signature = await connection.sendRawTransaction(
+      transaction.serialize(),
+      { skipPreflight: true, maxRetries: 5 }
+    );
+    console.log(`✅ Transaction Sent via Jupiter! Signature: ${signature}`);
+    console.log(
+      `🔍 Track on Solscan via Jupiter: https://solscan.io/tx/${signature}`
     );
 
-    if (confirmation.value.err) {
-      throw new Error(
-        `Transaction failed: ${JSON.stringify(
-          confirmation.value.err
-        )}\nhttps://solscan.io/tx/${signature}/`
-      );
-    }
+    await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight },
+      "processed"
+    );
+    console.log(
+      `✅ Swap Executed via Jupiter: https://solscan.io/tx/${signature}/ via ${
+        quoteResponse.route?.[0]?.market?.name || "Jupiter Aggregator"
+      }`
+    );
 
-    console.log(`✅ Swap Executed: https://solscan.io/tx/${signature}/`);
-    return true;
+    try {
+      const heliusApiKey = config.HELIUS_RPC_URL || process.env.HELIUS_API_KEY;
+      if (!heliusApiKey) {
+        throw new Error("HELIUS_API_KEY is missing in config or .env");
+      }
+
+      const heliusResponse = await axios.get(
+        `https://api.helius.xyz/v0/transactions/${signature}?api-key=${heliusApiKey}`
+      );
+      const transactionData = heliusResponse.data;
+
+      if (
+        transactionData &&
+        transactionData.meta &&
+        transactionData.meta.postTokenBalances
+      ) {
+        const outputTokenBalance = transactionData.meta.postTokenBalances.find(
+          (balance: any) =>
+            balance.mint === outputMint &&
+            balance.owner === wallet.publicKey.toBase58()
+        );
+        if (outputTokenBalance) {
+          const finalOutAmount = outputTokenBalance.uiAmount; // e.g., 26.468506 for 6 decimals
+          console.log(
+            "DEBUG: Final outAmount from Helius (UI):",
+            finalOutAmount
+          );
+          console.log(
+            "DEBUG: Final outAmount from Helius (lamports):",
+            outputTokenBalance.amount
+          );
+          return {
+            success: true,
+            outAmount: finalOutAmount, // Use actual UI amount (26.468506)
+            signature,
+            dex: quoteResponse.route?.[0]?.market?.name || "Jupiter Aggregator",
+          };
+        }
+      }
+      throw new Error("No postTokenBalances found in Helius response");
+    } catch (error) {
+      console.warn(
+        `WARNING: Failed to fetch final outAmount from Helius: ${
+          (error as Error).message
+        }. Using quote outAmount as fallback.`
+      );
+      const quoteOutAmount = Number(quoteResponse.outAmount);
+      console.log("DEBUG: Quote outAmount (lamports):", quoteOutAmount);
+      console.log(
+        "DEBUG: Quote outAmount (with 6 decimals):",
+        quoteOutAmount / 1_000_000
+      );
+      return {
+        success: true,
+        outAmount: quoteOutAmount / 1_000_000,
+        signature,
+        dex: quoteResponse.route?.[0]?.market?.name || "Jupiter Aggregator",
+      };
+    }
   } catch (error) {
-    console.error("❌ Swap execution failed:", error);
-    return false;
+    console.error(
+      "❌ Swap execution failed via Jupiter:",
+      (error as AxiosError).message
+    );
+    return { success: false, outAmount: 0 };
   }
 }
 
-/** ✅ Execute Buy Swap */
 async function executeSwapBuy(
   inputMint: string,
   outputMint: string,
   amount: number
-): Promise<boolean> {
-  console.log(`🛒 Buying ${amount} of ${outputMint} using ${inputMint}`);
+): Promise<SwapResult> {
+  console.log(
+    `🛒 Buying via Jupiter ${amount} of ${outputMint} using ${inputMint}`
+  );
   return executeSwap(inputMint, outputMint, amount);
 }
 
-/** ✅ Execute Sell Swap */
 async function executeSwapSell(
   inputMint: string,
   outputMint: string,
   percentageToSell: number
-): Promise<boolean> {
-  try {
-    console.log(
-      `🔄 Selling ${percentageToSell}% of ${inputMint} → ${outputMint}`
+): Promise<SwapResult> {
+  console.log(
+    `🔄 Selling via Jupiter ${percentageToSell}% of ${inputMint} → ${outputMint}`
+  );
+  const tokenBalance = await getTokenBalance(
+    inputMint,
+    new Connection(config.HELIUS_RPC_URL, { commitment: "processed" })
+  );
+  if (tokenBalance <= 0) {
+    console.error(
+      `❌ No balance found for ${inputMint} via Jupiter, unable to sell.`
     );
-
-    const tokenBalance = await getTokenBalance(inputMint);
-
-    if (tokenBalance <= 0) {
-      console.error(`❌ No balance found for ${inputMint}, unable to sell.`);
-      return false;
-    }
-
-    console.log(
-      `📊 Before Sell: ${inputMint} | Detected Balance: ${tokenBalance}`
-    );
-
-    const sellAmount = tokenBalance;
-    console.log(`💰 Selling ${sellAmount} tokens of ${inputMint}`);
-
-    return executeSwap(inputMint, outputMint, sellAmount);
-  } catch (error) {
-    console.error(`❌ Error fetching balance for ${inputMint}:`, error);
-    return false;
+    return { success: false, outAmount: 0 }; // Ensure outAmount is included
   }
+
+  const sellAmount =
+    percentageToSell === 100
+      ? tokenBalance
+      : Math.floor((tokenBalance * percentageToSell) / 100);
+  console.log(
+    `📊 Before Sell via Jupiter: ${inputMint} | Detected Balance: ${tokenBalance}, Selling: ${sellAmount} (${percentageToSell}%)`
+  );
+  if (sellAmount === 0 && percentageToSell > 0) {
+    console.warn(
+      `⚠️ Sell amount is 0 for ${percentageToSell}% via Jupiter—skipping.`
+    );
+    return { success: false, outAmount: 0 }; // Ensure outAmount is included
+  }
+
+  console.log(`💰 Selling via Jupiter ${sellAmount} tokens of ${inputMint}`);
+  return executeSwap(inputMint, outputMint, sellAmount);
 }
 
-/** ✅ Export Swap Functions */
 export { executeSwapBuy, executeSwapSell };

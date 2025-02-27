@@ -1,25 +1,48 @@
 import dotenv from "dotenv";
-import { trackWalletBalances } from "./tracker.js"; 
+import { startTracker } from "./tracker.js";
+import { Connection } from "@solana/web3.js";
+import { config } from "./config.js"; // Import config for Helius RPC URLs
 
-dotenv.config(); // Load environment variables
-
-const API_KEY = process.env.HELIUS_API_KEY;
-const WALLET_TO_TRACK = process.env.WALLET_TO_TRACK;
-
-console.log("🔍 HELIUS_API_KEY:", API_KEY ? "✅ Loaded!" : "❌ Not loaded!");
+console.log(`🌟 Bot Initializing | Solana Trading Bot`);
+dotenv.config();
 console.log(
-  "🔍 WALLET_TO_TRACK:",
-  WALLET_TO_TRACK ? `✅ ${WALLET_TO_TRACK}` : "❌ Not loaded!"
+  `🔧 Env Loaded      | Status: ${
+    !!process.env.HELIUS_API_KEY ? "Active" : "Inactive"
+  }`
 );
 
-if (!API_KEY || !WALLET_TO_TRACK) {
+const { HELIUS_API_KEY, WALLET_TO_TRACK } = process.env;
+
+console.log(
+  `🔑 API Key Check   | ${HELIUS_API_KEY ? "✅ Loaded" : "❌ Missing"}`
+);
+console.log(
+  `👛 Wallet Check    | ${
+    WALLET_TO_TRACK ? `✅ ${WALLET_TO_TRACK}` : "❌ Missing"
+  }`
+);
+
+if (!HELIUS_API_KEY || !WALLET_TO_TRACK) {
   console.error(
-    "❌ Missing required environment variables! Check your .env file."
+    `❌ Config Error    | Missing required environment variables! Check .env`
   );
   process.exit(1);
 }
 
-console.log(`🚀 Tracking wallet: ${WALLET_TO_TRACK}`);
+console.log(`🚀 Bot Launching   | Tracking Wallet: ${WALLET_TO_TRACK}`);
 
-// ✅ Start tracking transactions
-trackWalletBalances(WALLET_TO_TRACK);
+// Initialize connection globally for tracker.ts (since it uses a global connection)
+const connection = new Connection(config.HELIUS_RPC_URL, {
+  commitment: "processed",
+});
+
+try {
+  startTracker(); // No parameter needed, as tracker.ts uses global connection
+} catch (error) {
+  if (error instanceof Error) {
+    console.error(`❌ Launch Failed    | Error: ${error.message}`);
+  } else {
+    console.error(`❌ Launch Failed    | Unknown Error: ${error}`);
+  }
+  process.exit(1);
+}
