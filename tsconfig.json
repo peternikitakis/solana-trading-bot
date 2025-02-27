@@ -10,8 +10,20 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
-    "lib": ["ES2020"] // Ensure Map and other ES2020 types are available
+    "lib": ["ES2020"],
+    "types": ["node"] // Add Node.js types
+    // Optional: Add baseUrl and paths for cleaner imports
+    // "baseUrl": "src",
+    // "paths": {
+    //   "config/*": ["config/*"],
+    //   "notifications/*": ["notifications/*"],
+    //   "tracking/*": ["tracking/*"],
+    //   "trading/*": ["trading/*"],
+    //   "utils/*": ["utils/*"],
+    //   "stats/*": ["stats/*"],
+    //   "main/*": ["main/*"]
+    // }
   },
-  "include": ["src", "src/types.d.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }
