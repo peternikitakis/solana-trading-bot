@@ -102,7 +102,7 @@ async function getBestQuote(
 
 export type SwapResult = {
   success: boolean;
-  outAmount: number; // Use number for UI amount (e.g., 26.468506)
+  outAmount: number; 
   signature?: string;
   dex?: string;
 };
@@ -119,7 +119,7 @@ async function executeSwap(
     const quoteResponse = await getBestQuote(inputMint, outputMint, amount);
     if (!quoteResponse) {
       console.error("❌ Swap failed via Jupiter: No valid quote found.");
-      return { success: false, outAmount: 0 }; // Ensure outAmount is included
+      return { success: false, outAmount: 0 }; // Ensure outAmount is in lamports
     }
 
     console.log(
@@ -151,7 +151,7 @@ async function executeSwap(
         "❌ Swap transaction creation failed via Jupiter:",
         swapResponse.data
       );
-      return { success: false, outAmount: 0 }; // Ensure outAmount is included
+      return { success: false, outAmount: 0 }; // Ensure outAmount is in lamports
     }
 
     console.log(
@@ -217,18 +217,14 @@ async function executeSwap(
             balance.owner === wallet.publicKey.toBase58()
         );
         if (outputTokenBalance) {
-          const finalOutAmount = outputTokenBalance.uiAmount; // e.g., 26.468506 for 6 decimals
-          console.log(
-            "DEBUG: Final outAmount from Helius (UI):",
-            finalOutAmount
-          );
+          const finalOutAmount = Number(outputTokenBalance.amount); // Use lamports (e.g., 249244)
           console.log(
             "DEBUG: Final outAmount from Helius (lamports):",
-            outputTokenBalance.amount
+            finalOutAmount
           );
           return {
             success: true,
-            outAmount: finalOutAmount, // Use actual UI amount (26.468506)
+            outAmount: finalOutAmount, // Return in lamports
             signature,
             dex: quoteResponse.route?.[0]?.market?.name || "Jupiter Aggregator",
           };
@@ -241,15 +237,11 @@ async function executeSwap(
           (error as Error).message
         }. Using quote outAmount as fallback.`
       );
-      const quoteOutAmount = Number(quoteResponse.outAmount);
+      const quoteOutAmount = Number(quoteResponse.outAmount); // Already in lamports
       console.log("DEBUG: Quote outAmount (lamports):", quoteOutAmount);
-      console.log(
-        "DEBUG: Quote outAmount (with 6 decimals):",
-        quoteOutAmount / 1_000_000
-      );
       return {
         success: true,
-        outAmount: quoteOutAmount / 1_000_000,
+        outAmount: quoteOutAmount, // Return in lamports
         signature,
         dex: quoteResponse.route?.[0]?.market?.name || "Jupiter Aggregator",
       };
@@ -259,7 +251,7 @@ async function executeSwap(
       "❌ Swap execution failed via Jupiter:",
       (error as AxiosError).message
     );
-    return { success: false, outAmount: 0 };
+    return { success: false, outAmount: 0 }; // Ensure outAmount is in lamports
   }
 }
 
@@ -290,7 +282,7 @@ async function executeSwapSell(
     console.error(
       `❌ No balance found for ${inputMint} via Jupiter, unable to sell.`
     );
-    return { success: false, outAmount: 0 }; // Ensure outAmount is included
+    return { success: false, outAmount: 0 }; // Ensure outAmount is in lamports
   }
 
   const sellAmount =
@@ -304,7 +296,7 @@ async function executeSwapSell(
     console.warn(
       `⚠️ Sell amount is 0 for ${percentageToSell}% via Jupiter—skipping.`
     );
-    return { success: false, outAmount: 0 }; // Ensure outAmount is included
+    return { success: false, outAmount: 0 }; // Ensure outAmount is in lamports
   }
 
   console.log(`💰 Selling via Jupiter ${sellAmount} tokens of ${inputMint}`);

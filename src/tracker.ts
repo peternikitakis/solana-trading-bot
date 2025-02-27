@@ -1,7 +1,7 @@
 import { Connection, PublicKey, Keypair } from "@solana/web3.js";
 import { executeSwapBuy, executeSwapSell, SwapResult } from "./trader.js";
 import { config } from "./config.js"; // Ensure this matches your file extension and path
-import { sendWalletNotification, sendBotNotification } from "./notify_v3.js";
+import { sendWalletNotification, sendBotNotification } from "./notify.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -152,11 +152,14 @@ async function compareBalances(
         console.log(
           `✅ Buy Executed | Token: ${token} | Amount: ${config.TRADE_AMOUNT_SOL} SOL | Signature: ${result.signature}`
         );
+        // Convert token outAmount to UI units (assuming 6 decimals for most Solana tokens)
+        const tokenDecimals = 6; // Adjust based on the token's actual decimals (check token metadata)
+        const tokensBought = result.outAmount / Math.pow(10, tokenDecimals); // Convert lamports to UI (e.g., 92.940706)
         await sendBotNotification(
           "BUY",
           botWallet,
           token,
-          result.outAmount,
+          tokensBought, // Pass in UI units (e.g., 92.940706)
           TRADE_AMOUNT_LAMPORTS,
           result.signature,
           result.dex
@@ -165,7 +168,7 @@ async function compareBalances(
           "BUY",
           walletAddress,
           token,
-          newBalance - oldBalance,
+          (newBalance - oldBalance) / Math.pow(10, tokenDecimals), // Convert balance diff to UI units
           TRADE_AMOUNT_LAMPORTS,
           "Jupiter Aggregator"
         );
@@ -184,7 +187,7 @@ async function compareBalances(
         }`
       );
       await sendWalletNotification("INCREASE ALERT", walletAddress, token, {
-        wallet: newBalance,
+        wallet: newBalance / Math.pow(10, 6), // Convert to UI units (6 decimals)
       }).catch((error) =>
         console.log(`❌ INCREASE ALERT Error | Token: ${token} | ${error}`)
       );
@@ -211,20 +214,20 @@ async function compareBalances(
         );
         const sellEnd = Date.now();
         if (result.success) {
-          solReturned = result.outAmount;
+          solReturned = result.outAmount / 1_000_000_000; // Convert lamports to SOL
           const newBotBalance =
             botBalance - botBalance * (decreasePercent / 100);
           botBalances.set(token, newBotBalance);
           persistBotBalances();
           console.log(
-            `✅ Sell Executed | Token: ${token} | SOL Returned: ${solReturned}`
+            `✅ Sell Executed | Token: ${token} | SOL Returned: ${solReturned.toFixed(6)}`
           );
           await sendBotNotification(
             "DECREASE ALERT",
             botWallet,
             token,
             {
-              solReturned: solReturned,
+              solReturned: solReturned, // Now in SOL (e.g., 0.00028)
               decreasePercent: decreasePercent.toFixed(2),
             },
             undefined,
@@ -243,7 +246,7 @@ async function compareBalances(
         walletAddress,
         token,
         {
-          solReturned: solReturned,
+          solReturned: solReturned, // Now in SOL
           decreasePercent: decreasePercent.toFixed(2),
         },
         undefined,
@@ -268,13 +271,13 @@ async function compareBalances(
         botBalances.set(token, 0);
         persistBotBalances();
         console.log(
-          `✅ Full Sell Executed | Token: ${token} | SOL Returned: ${result.outAmount}`
+          `✅ Full Sell Executed | Token: ${token} | SOL Returned: ${(result.outAmount / 1_000_000_000).toFixed(6)}`
         );
         await sendWalletNotification(
           "SELL",
           TRACKED_WALLET,
           token,
-          { solReturned: result.outAmount, updatedBalance: 0 },
+          { solReturned: result.outAmount / 1_000_000_000, updatedBalance: 0 }, // Convert lamports to SOL
           undefined,
           "Jupiter Aggregator"
         );
@@ -282,7 +285,7 @@ async function compareBalances(
           "SELL",
           botWallet,
           token,
-          { solReturned: result.outAmount, updatedBalance: 0 },
+          { solReturned: result.outAmount / 1_000_000_000, updatedBalance: 0 }, // Convert lamports to SOL
           undefined,
           result.signature,
           result.dex
