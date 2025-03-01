@@ -253,10 +253,9 @@ async function compareBalances(
         latency = sellEnd - sellStart; // Assign value here
         success = result.success;
         if (result.success) {
-          solReturned = result.outAmount / Math.pow(10, tokenDecimals); // Convert lamports to UI using 6 decimals (e.g., 0.00028)
-          const newBotBalance =
-            botBalance - botBalance * (decreasePercent / 100);
-          botBalances.set(token, newBotBalance);
+          solReturned = result.outAmount / 1_000_000_000;
+          const newBotTokenBalance = botBalance - botBalance * (decreasePercent / 100);
+          botBalances.set(token, newBotTokenBalance);
           persistBotBalances();
           console.log(
             `✅ Sell Executed | Token: ${token} | SOL Returned: ${solReturned.toFixed(6)}`
@@ -291,7 +290,7 @@ async function compareBalances(
           walletAddress,
           token,
           {
-            solReturned: decreaseAmount, // Tracked wallet’s SOL returned in UI units (no scaling needed)
+            solReturned, // Tracked wallet’s SOL returned in UI units (no scaling needed)
             decreasePercent: decreasePercent.toFixed(2),
           },
           latency, // Use latency here, now in scope
@@ -326,6 +325,8 @@ async function compareBalances(
         persistBotBalances();
         // Clear previousBalances for this token to allow new buys
         previousBalances.delete(token);
+        const solReturned = result.outAmount / 1_000_000_000; // convert lamports to SOL
+        const formattedSolReturned = Number(solReturned.toFixed(6));
         console.log(
           `✅ Full Sell Executed | Token: ${token} | SOL Returned: ${(result.outAmount / Math.pow(10, tokenDecimals)).toFixed(6)}`
         );
@@ -333,7 +334,7 @@ async function compareBalances(
           "SELL",
           TRACKED_WALLET,
           token,
-          { solReturned: oldBalance, updatedBalance: 0 }, // Tracked wallet’s SOL returned in UI units (no scaling needed)
+          { solReturned: formattedSolReturned, updatedBalance: 0 }, // Tracked wallet’s SOL returned in UI units (no scaling needed)
           latency, // Use latency here, now in scope
           undefined,
           trackedWalletSignatures.get(token), // Pass tracked wallet’s signature for Solscan link
