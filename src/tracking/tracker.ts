@@ -1,7 +1,12 @@
 import { Connection, PublicKey, Keypair } from "@solana/web3.js";
 import { executeSwapBuy, executeSwapSell, SwapResult } from "../trading/trader.js";
-import { config } from "../utils/config.js"; // Ensure this matches your file extension and path
+import { config } from "../config/config.js"; // Ensure this matches your file extension and path
 import { sendWalletNotification, sendBotNotification } from "../notifications/notify.js";
+import { 
+  updatePerformanceMetrics, 
+  logPerformanceMetrics, 
+  resetMetrics 
+} from "../stats/metrics.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -55,7 +60,11 @@ const processedSignatures = new Set<string>();
 let apiCallCount = 0;
 let tradeCount = 0;
 let lastBalanceCheck = 0;
+let metrics = resetMetrics();
 const MIN_CHECK_INTERVAL = 50; // 50ms debounce for balance checks
+
+// Add trackedWalletSignatures as a global variable
+const trackedWalletSignatures = new Map<string, string>(); // Map of token -> signature for tracked wallet transactions
 
 // Load bot wallet and initialize connection
 function loadKeypair(): Keypair {
@@ -98,7 +107,7 @@ async function getWalletTokenBalances(
       const balance = parseFloat(
         account.account.data.parsed.info.tokenAmount.uiAmountString
       );
-      if (balance > 0) tokenBalances.set(mint, balance);
+      if (balance > 0) tokenBalances.set(mint, balance); // Already in UI units (scaled for decimals)
     }
     return tokenBalances;
   } catch (error) {
@@ -126,8 +135,8 @@ async function compareBalances(
   const newTokens = new Set(newBalances.keys());
 
   const tradePromises = Array.from(newTokens).map(async (token) => {
-    const newBalance = newBalances.get(token) || 0;
-    const oldBalance = oldBalances.get(token) || 0;
+    const newBalance = newBalances.get(token) || 0; // Already in UI units (scaled for 6 decimals)
+    const oldBalance = oldBalances.get(token) || 0; // Already in UI units (scaled for 6 decimals)
 
     // Initial Buy
     if (
@@ -136,7 +145,7 @@ async function compareBalances(
       !previousBalances.has(token)
     ) {
       console.log(
-        `🟢 Tracking: Buy Detected | Token: ${token} | Wallet: ${walletAddress} | Amount: ${newBalance}`
+        `🟢 Tracking: Buy Detected | Token: ${token} | Wallet: ${walletAddress} | Amount: ${newBalance} UI units`
       );
       tradeCount++;
       const buyStart = Date.now();
@@ -146,20 +155,24 @@ async function compareBalances(
         TRADE_AMOUNT_LAMPORTS
       );
       const buyEnd = Date.now();
+      const latency = buyEnd - buyStart;
+      const success = result.success;
       if (result.success && result.outAmount) {
         botBalances.set(token, result.outAmount);
         persistBotBalances();
         console.log(
           `✅ Buy Executed | Token: ${token} | Amount: ${config.TRADE_AMOUNT_SOL} SOL | Signature: ${result.signature}`
         );
-        // Convert token outAmount to UI units (assuming 6 decimals for most Solana tokens)
-        const tokenDecimals = 6; // Adjust based on the token's actual decimals (check token metadata)
-        const tokensBought = result.outAmount / Math.pow(10, tokenDecimals); // Convert lamports to UI (e.g., 92.940706)
+        // Use tokenDecimals = 6 (confirmed)
+        const tokenDecimals = 6;
+        const tokensBought = result.outAmount / Math.pow(10, tokenDecimals); // Bot’s tokens bought in UI units (e.g., 600.952259)
+        const walletTokensBought = newBalance - oldBalance; // Tracked wallet’s tokens bought in UI units (e.g., 1,189.763635, no scaling needed)
         await sendBotNotification(
           "BUY",
           botWallet,
           token,
-          tokensBought, // Pass in UI units (e.g., 92.940706)
+          tokensBought, // Pass in UI units (e.g., 600.952259) for bot
+          latency,
           TRADE_AMOUNT_LAMPORTS,
           result.signature,
           result.dex
@@ -168,11 +181,16 @@ async function compareBalances(
           "BUY",
           walletAddress,
           token,
-          (newBalance - oldBalance) / Math.pow(10, tokenDecimals), // Convert balance diff to UI units
+          walletTokensBought, // Pass tracked wallet’s tokens bought as details (e.g., 1,189.763635)
+          latency,
           TRADE_AMOUNT_LAMPORTS,
+          trackedWalletSignatures.get(token), // Pass tracked wallet’s signature for Solscan link
           "Jupiter Aggregator"
         );
-        console.log(`⏱ Execution Time | Buy: ${buyEnd - buyStart}ms`);
+        console.log(`⏱ Execution Time | Buy: ${latency}ms`);
+
+        // After latency and success determination
+        metrics = updatePerformanceMetrics(tradeCount, latency, success, metrics);
       } else {
         console.log(
           `❌ Buy Failed | Token: ${token} | No successful swap result`
@@ -182,28 +200,47 @@ async function compareBalances(
       // Increase in Stake
     } else if (newBalance > oldBalance) {
       console.log(
-        `📈 Tracking: Balance Increased | Token: ${token} | Tracked Wallet: +${
-          newBalance - oldBalance
-        }`
+        `📈 Tracking: Balance Increased | Token: ${token} | Tracked Wallet: +${newBalance - oldBalance} UI units`
       );
-      await sendWalletNotification("INCREASE ALERT", walletAddress, token, {
-        wallet: newBalance / Math.pow(10, 6), // Convert to UI units (6 decimals)
-      }).catch((error) =>
+      const previousBalance = previousBalances.get(token) || 0;
+      const currentIncrease = newBalance - oldBalance;
+      const accumulatedBalance = (previousBalances.get(token) || 0) + (newBalance - (oldBalance || 0)); 
+      previousBalances.set(token, accumulatedBalance); 
+
+      let increasePercentage = 0;
+      if (previousBalance > 0) {
+        increasePercentage = ((accumulatedBalance - previousBalance) / previousBalance) * 100; } else if (accumulatedBalance > 0) {
+          increasePercentage = 100;
+        }
+
+      await sendWalletNotification(
+        "INCREASE ALERT",
+         walletAddress, 
+         token,
+        { wallet: accumulatedBalance, increasePercent: increasePercentage.toFixed(2) }, // Use raw difference in UI units (no scaling needed)
+        0, 
+        undefined,
+        trackedWalletSignatures.get(token), 
+        "Jupiter Aggregator"
+      ).catch((error) =>
         console.log(`❌ INCREASE ALERT Error | Token: ${token} | ${error}`)
       );
 
       // Decrease in Stake (Partial Sell)
     } else if (newBalance < oldBalance && newBalance > 0) {
-      const decreaseAmount = oldBalance - newBalance;
+      const decreaseAmount = oldBalance - newBalance; // In UI units
       const decreasePercent = (decreaseAmount / oldBalance) * 100;
       const botBalance = botBalances.get(token) || 0;
       console.log(
-        `📉 Tracking: Balance Decreased | Token: ${token} | Tracked Wallet: -${decreaseAmount} (${decreasePercent.toFixed(
+        `📉 Tracking: Balance Decreased | Token: ${token} | Tracked Wallet: -${decreaseAmount} UI units (${decreasePercent.toFixed(
           2
         )}%)`
       );
 
       let solReturned = 0;
+      let latency: number | undefined; // Declare latency here
+      let success: boolean | undefined; // Declare success for consistency
+      const tokenDecimals = 6; // Use 6 decimals (confirmed)
       if (botBalance > 0) {
         tradeCount++;
         const sellStart = Date.now();
@@ -213,8 +250,10 @@ async function compareBalances(
           decreasePercent
         );
         const sellEnd = Date.now();
+        latency = sellEnd - sellStart; // Assign value here
+        success = result.success;
         if (result.success) {
-          solReturned = result.outAmount / 1_000_000_000; // Convert lamports to SOL
+          solReturned = result.outAmount / Math.pow(10, tokenDecimals); // Convert lamports to UI using 6 decimals (e.g., 0.00028)
           const newBotBalance =
             botBalance - botBalance * (decreasePercent / 100);
           botBalances.set(token, newBotBalance);
@@ -227,74 +266,95 @@ async function compareBalances(
             botWallet,
             token,
             {
-              solReturned: solReturned, // Now in SOL (e.g., 0.00028)
+              solReturned, // Now in UI units (e.g., 0.00028)
               decreasePercent: decreasePercent.toFixed(2),
             },
+            latency, // Use assigned latency
             undefined,
             result.signature,
             result.dex
           );
-          console.log(`⏱ Execution Time | Sell: ${sellEnd - sellStart}ms`);
+          console.log(`⏱ Execution Time | Sell: ${latency}ms`);
+
+          // Update metrics for latency and success
+          metrics = updatePerformanceMetrics(tradeCount, latency, success, metrics);
         } else {
           console.log(
             `❌ Sell Failed | Token: ${token} | No successful swap result`
           );
+          metrics = updatePerformanceMetrics(tradeCount, latency, false, metrics);
         }
       }
-      await sendWalletNotification(
-        "DECREASE ALERT",
-        walletAddress,
-        token,
-        {
-          solReturned: solReturned, // Now in SOL
-          decreasePercent: decreasePercent.toFixed(2),
-        },
-        undefined,
-        "Jupiter Aggregator"
-      );
+      if (latency !== undefined) { // Only send notification if a trade occurred
+        await sendWalletNotification(
+          "DECREASE ALERT",
+          walletAddress,
+          token,
+          {
+            solReturned: decreaseAmount, // Tracked wallet’s SOL returned in UI units (no scaling needed)
+            decreasePercent: decreasePercent.toFixed(2),
+          },
+          latency, // Use latency here, now in scope
+          undefined,
+          trackedWalletSignatures.get(token), // Pass tracked wallet’s signature for Solscan link
+          "Jupiter Aggregator"
+        );
+      }
     }
   }); // Closing tradePromises.map
 
   // Full Sell
   const sellPromises = Array.from(oldTokens).map(async (token) => {
-    const newBalance = newBalances.get(token) || 0;
+    const newBalance = newBalances.get(token) || 0; // Already in UI units (scaled for 6 decimals)
     const botBalance = botBalances.get(token) || 0;
+    let latency: number | undefined; // Declare latency here
+    let success: boolean | undefined; // Declare success for consistency
+    const tokenDecimals = 6; // Use 6 decimals (confirmed)
+    const oldBalance = oldBalances.get(token) || 0; // Already in UI units (scaled for 6 decimals)
     if ((!newTokens.has(token) || newBalance <= 0.001) && botBalance > 0) {
       console.log(
-        `🔴 Tracking: Full Sell | Token: ${token} | Amount: ${botBalance}`
+        `🔴 Tracking: Full Sell | Token: ${token} | Amount: ${botBalance} UI units`
       );
       tradeCount++;
       const sellStart = Date.now();
       const result: SwapResult = await executeSwapSell(token, solMint, 100);
       const sellEnd = Date.now();
+      latency = sellEnd - sellStart; // Assign value here
+      success = result.success;
       if (result.success) {
         botBalances.set(token, 0);
         persistBotBalances();
+        // Clear previousBalances for this token to allow new buys
+        previousBalances.delete(token);
         console.log(
-          `✅ Full Sell Executed | Token: ${token} | SOL Returned: ${(result.outAmount / 1_000_000_000).toFixed(6)}`
+          `✅ Full Sell Executed | Token: ${token} | SOL Returned: ${(result.outAmount / Math.pow(10, tokenDecimals)).toFixed(6)}`
         );
         await sendWalletNotification(
           "SELL",
           TRACKED_WALLET,
           token,
-          { solReturned: result.outAmount / 1_000_000_000, updatedBalance: 0 }, // Convert lamports to SOL
+          { solReturned: oldBalance, updatedBalance: 0 }, // Tracked wallet’s SOL returned in UI units (no scaling needed)
+          latency, // Use latency here, now in scope
           undefined,
+          trackedWalletSignatures.get(token), // Pass tracked wallet’s signature for Solscan link
           "Jupiter Aggregator"
         );
         await sendBotNotification(
           "SELL",
           botWallet,
           token,
-          { solReturned: result.outAmount / 1_000_000_000, updatedBalance: 0 }, // Convert lamports to SOL
+          { solReturned: result.outAmount / Math.pow(10, tokenDecimals), updatedBalance: 0 }, // Bot’s SOL returned in UI units
+          latency, // Use latency here, now in scope
           undefined,
           result.signature,
           result.dex
         );
-        console.log(`⏱ Execution Time | Sell: ${sellEnd - sellStart}ms`);
+        console.log(`⏱ Execution Time | Sell: ${latency}ms`); // Use latency instead of sellEnd - sellStart
       } else {
         console.log(
           `❌ Full Sell Failed | Token: ${token} | No successful swap result`
         );
+        metrics = updatePerformanceMetrics(tradeCount, latency, false, metrics);
       }
     }
   }); // Closing sellPromises.map
@@ -304,6 +364,11 @@ async function compareBalances(
   console.log(
     `📊 API Fetch Count | Trades: ${tradeCount} | Calls: ${apiCallCount}`
   );
+
+  process.on('exit', () => {
+    logPerformanceMetrics(tradeCount, metrics, process.env.DEBUG === "true");
+  });
+
 } // Closing compareBalances
 
 export function startTracker() {
@@ -367,6 +432,19 @@ export function startTracker() {
       if (now - lastBalanceCheck >= MIN_CHECK_INTERVAL) {
         const newBalances = await getWalletTokenBalances(TRACKED_WALLET!);
         apiCallCount++; // Increment for balance fetch
+        for (const [token, newBal] of newBalances) {
+          const oldBal = previousBalances.get(token) || 0;
+          if (newBal > oldBal) {
+            // Buy detected—store signature for this token
+            trackedWalletSignatures.set(token, logs.signature);
+          } else if (newBal < oldBal && newBal > 0) {
+            // Partial sell/decrease detected—store signature for this token
+            trackedWalletSignatures.set(token, logs.signature);
+          } else if (!newBalances.has(token) || newBal <= 0.001) {
+            // Full sell detected—store signature for this token
+            trackedWalletSignatures.set(token, logs.signature);
+          }
+        }
         compareBalances(TRACKED_WALLET!, previousBalances, newBalances);
         previousBalances = newBalances;
         lastBalanceCheck = now;

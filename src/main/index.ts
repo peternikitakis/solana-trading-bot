@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import { startTracker } from "../tracking/tracker.js";
 import { Connection } from "@solana/web3.js";
-import { config } from "../utils/config.js"; // Import config for Helius RPC URLs
+import { config } from "../config/config.js"; // Import config for Helius RPC URLs
 
 console.log(`🌟 Bot Initializing | Solana Trading Bot`);
 dotenv.config();

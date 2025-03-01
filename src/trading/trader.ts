@@ -6,7 +6,7 @@ import {
 } from "@solana/web3.js";
 import axios, { AxiosError } from "axios";
 import { Wallet } from "@project-serum/anchor";
-import { config } from "../utils/config.js";
+import { config } from "../config/config.js";
 
 const JUPITER_QUOTE_API =
   config.JUPITER_API || "https://api.jup.ag/swap/v1/quote";
