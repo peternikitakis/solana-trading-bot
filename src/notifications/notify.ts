@@ -46,9 +46,11 @@ export async function sendWalletNotification(
 
   if (type === "BUY" && typeof details === "number") {
     amount = details.toFixed(6);
+    const solTradeValue = tradeLamports ? (tradeLamports / 1_000_000_000).toFixed(6) : "0.000000";
     fields = [
       { name: "💳 Tracked Wallet", value: `\`\`\`${walletAddress}\`\`\``, inline: false },
       { name: "🪙 Token Address", value: `\`\`\`${token}\`\`\``, inline: false },
+      { name: "💵 SOL Trade Value", value: solTradeValue, inline: false }, // Move SOL
       { name: "💰 Tokens Bought", value: amount as string, inline: false },
       { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
       {
@@ -85,7 +87,7 @@ export async function sendWalletNotification(
       { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
       {
         name: "🔗 Transaction",
-        value: signature ? `[View on Solscan](https://solscan.io/tx/${signature})` : "N/A",
+        value: `[View on Solscan](https://solscan.io/account/9GeqmJ54mTWdcbvNvnosexMyJEj6z2mMgq4jDzWCmXL2)`, // Use exact tracked wallet account link for DECREASE ALERT
         inline: false,
       },
     ];
@@ -98,7 +100,7 @@ export async function sendWalletNotification(
       { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
       {
         name: "🔗 Transaction",
-        value: signature ? `[View on Solscan](https://solscan.io/tx/${signature})` : "N/A",
+        value: `[View on Solscan](https://solscan.io/account/9GeqmJ54mTWdcbvNvnosexMyJEj6z2mMgq4jDzWCmXL2)`, // Use exact tracked wallet account link for SELL
         inline: false,
       },
     ];
@@ -115,19 +117,19 @@ export async function sendWalletNotification(
   switch (type) {
     case "BUY":
       color = 65280; // Green
-      title = "🟢 Trade Completed (Buy)";
+      title = "🟢 Swap Buy Alert";
       break;
     case "SELL":
       color = 16711680; // Red
-      title = "🔴 Trade Completed (Tracked Wallet Sell)";
+      title = "🔴 Swap Sell Alert";
       break;
     case "INCREASE ALERT":
       color = 3447003; // Blue
-      title = "📈 Trade Completed (Increase Alert)";
+      title = "📈 Swap Increase Alert";
       break;
     case "DECREASE ALERT":
       color = 16753920; // Orange
-      title = "🟡 Decrease Alert (Tracked Wallet Partial Sell)";
+      title = "🟡 Swap Decrease Alert";
       break;
     default:
       color = 0; // Gray
@@ -214,7 +216,7 @@ export async function sendBotNotification(
       fields = [
         { name: "💳 Bot Wallet", value: `\`\`\`${walletAddress}\`\`\``, inline: false },
         { name: "🪙 Token Address", value: `\`\`\`${token}\`\`\``, inline: false },
-        { name: "💵 Trade Value", value: `${tradeValueSol} SOL`, inline: false },
+        { name: "💵 SOL Trade Value", value: `${tradeValueSol} SOL`, inline: false },
         { name: "💰 Tokens Bought", value: amount as string, inline: false },
         { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
         {
