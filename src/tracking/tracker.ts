@@ -165,7 +165,7 @@ async function compareBalances(
         );
         // Use tokenDecimals = 6 (confirmed)
         const tokenDecimals = 6;
-        const tokensBought = result.outAmount / Math.pow(10, tokenDecimals); // Bot’s tokens bought in UI units (e.g., 600.952259)
+        const tokensBought = Number((result.outAmount / Math.pow(10, tokenDecimals)).toFixed(8)); // Adjust to match 5.21089998(e.g., 600.952259)
         const walletTokensBought = newBalance - oldBalance; // Tracked wallet’s tokens bought in UI units (e.g., 1,189.763635, no scaling needed)
         await sendBotNotification(
           "BUY",
@@ -285,19 +285,28 @@ async function compareBalances(
         }
       }
       if (latency !== undefined) { // Only send notification if a trade occurred
-        await sendWalletNotification(
-          "DECREASE ALERT",
-          walletAddress,
-          token,
-          {
-            solReturned, // Tracked wallet’s SOL returned in UI units (no scaling needed)
-            decreasePercent: decreasePercent.toFixed(2),
-          },
-          latency, // Use latency here, now in scope
-          undefined,
-          trackedWalletSignatures.get(token), // Pass tracked wallet’s signature for Solscan link
-          "Jupiter Aggregator"
-        );
+        const signature = `https://solscan.io/account/${TRACKED_WALLET}`; // Use tracked wallet’s account link dynamically
+        if (process.env.DEBUG === "true") {
+          console.log(`🔍 Partial Sell Signature | Token: ${token} | Tracked Wallet: ${signature}`);
+        }
+        try {
+          await sendWalletNotification(
+            "DECREASE ALERT",
+            walletAddress,
+            token,
+            {
+              solReturned, // Tracked wallet’s SOL returned in UI units (no scaling needed)
+              decreasePercent: decreasePercent.toFixed(2),
+            },
+            latency, // Use latency here, now in scope
+            undefined, // tradeLamports (optional)
+            signature, // Use dynamic account link as signature
+            "Jupiter Aggregator" // dex (optional)
+          );
+          console.log(`✅ Wallet Notification Sent for DECREASE ALERT on ${token}`);
+        } catch (error) {
+          console.error(`❌ Failed to send wallet notification for DECREASE ALERT on ${token}: ${(error as Error).message}`);
+        }
       }
     }
   }); // Closing tradePromises.map
@@ -330,21 +339,26 @@ async function compareBalances(
         console.log(
           `✅ Full Sell Executed | Token: ${token} | SOL Returned: ${(result.outAmount / Math.pow(10, tokenDecimals)).toFixed(6)}`
         );
-        await sendWalletNotification(
-          "SELL",
-          TRACKED_WALLET,
-          token,
-          { solReturned: formattedSolReturned, updatedBalance: 0 }, // Tracked wallet’s SOL returned in UI units (no scaling needed)
-          latency, // Use latency here, now in scope
-          undefined,
-          trackedWalletSignatures.get(token), // Pass tracked wallet’s signature for Solscan link
-          "Jupiter Aggregator"
-        );
+        try {
+          await sendWalletNotification(
+            "SELL",
+            TRACKED_WALLET,
+            token,
+            { decreasePercent: "100" }, // Tracked wallet’s SOL returned in UI units (no scaling needed)
+            latency, // Use latency here, now in scope
+            undefined, // tradeLamports (optional)
+            `https://solscan.io/account/${TRACKED_WALLET}`, // Use dynamic account link as signature
+            "Jupiter Aggregator" // dex (optional)
+          );
+          console.log(`✅ Wallet Notification Sent for SELL on ${token}`);
+        } catch (error) {
+          console.error(`❌ Failed to send wallet notification for SELL on ${token}: ${(error as Error).message}`);
+        }
         await sendBotNotification(
           "SELL",
           botWallet,
           token,
-          { solReturned: result.outAmount / Math.pow(10, tokenDecimals), updatedBalance: 0 }, // Bot’s SOL returned in UI units
+          { solReturned: formattedSolReturned, updatedBalance: 0 },// Bot’s SOL returned in UI units
           latency, // Use latency here, now in scope
           undefined,
           result.signature,
@@ -369,8 +383,7 @@ async function compareBalances(
   process.on('exit', () => {
     logPerformanceMetrics(tradeCount, metrics, process.env.DEBUG === "true");
   });
-
-} // Closing compareBalances
+}
 
 export function startTracker() {
   const trackedWallet = new PublicKey(TRACKED_WALLET!);

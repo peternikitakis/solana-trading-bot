@@ -9,7 +9,14 @@ type NotificationDetails =
   | number
   | { wallet: number, increasePercent: string }
   | { solReturned: number; decreasePercent: string }
-  | { solReturned: number; updatedBalance: number };
+  | { solReturned: number; updatedBalance: number }
+  | { decreasePercent: string };
+
+
+
+function isDecreaseDetails(details: NotificationDetails): details is { decreasePercent: string } {
+    return typeof details === "object" && details !== null && "decreasePercent" in details && !("solReturned" in details);
+  }
 
 function isWalletDetails(details: NotificationDetails): details is { wallet: number, increasePercent: string} {
   return typeof details === "object" && details !== null && "wallet" in details && typeof details.wallet === "number";
@@ -78,29 +85,23 @@ export async function sendWalletNotification(
     fields = [
       { name: "💳 Tracked Wallet", value: `\`\`\`${walletAddress}\`\`\``, inline: false },
       { name: "🪙 Token Address", value: `\`\`\`${token}\`\`\``, inline: false },
-      { name: "💰 SOL Returned", value: amount as string, inline: false },
-      {
-        name: "📉 Decrease %",
-        value: `${details.decreasePercent}%`,
-        inline: false,
-      },
+      { name: "📉 Sold", value: `${details.decreasePercent}%`, inline: false },
       { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
       {
         name: "🔗 Transaction",
-        value: `[View on Solscan](https://solscan.io/account/9GeqmJ54mTWdcbvNvnosexMyJEj6z2mMgq4jDzWCmXL2)`, // Use exact tracked wallet account link for DECREASE ALERT
+        value: signature ? (signature.startsWith("https://solscan.io/account/") ? `[View on Solscan](${signature})` : `[View on Solscan](https://solscan.io/tx/${signature})`) : "N/A",
         inline: false,
       },
     ];
-  } else if (type === "SELL" && isSolReturnedWithBalance(details)) {
-    amount = details.solReturned.toFixed(6);
+  } else if (type === "SELL" && isDecreaseDetails(details)) {
     fields = [
       { name: "💳 Tracked Wallet", value: `\`\`\`${walletAddress}\`\`\``, inline: false },
       { name: "🪙 Token Sold", value: `\`\`\`${token}\`\`\``, inline: false },
-      { name: "💰 SOL Returned", value: amount as string, inline: false },
+      { name: "📉 Sold %", value: `${details.decreasePercent}%`, inline: false},
       { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
       {
         name: "🔗 Transaction",
-        value: `[View on Solscan](https://solscan.io/account/9GeqmJ54mTWdcbvNvnosexMyJEj6z2mMgq4jDzWCmXL2)`, // Use exact tracked wallet account link for SELL
+        value: signature ? (signature.startsWith("https://solscan.io/account/") ? `[View on Solscan](${signature})` : `[View on Solscan](https://solscan.io/tx/${signature})`) : "N/A",
         inline: false,
       },
     ];
@@ -117,19 +118,19 @@ export async function sendWalletNotification(
   switch (type) {
     case "BUY":
       color = 65280; // Green
-      title = "🟢 Swap Buy Alert";
+      title = "🟢 Buy Alert";
       break;
     case "SELL":
       color = 16711680; // Red
-      title = "🔴 Swap Sell Alert";
+      title = "🔴 Full Sell Alert";
       break;
     case "INCREASE ALERT":
       color = 3447003; // Blue
-      title = "📈 Swap Increase Alert";
+      title = "🔵 Increase Alert";
       break;
     case "DECREASE ALERT":
       color = 16753920; // Orange
-      title = "🟡 Swap Decrease Alert";
+      title = "🟡 Partial Sell Alert";
       break;
     default:
       color = 0; // Gray
@@ -216,7 +217,7 @@ export async function sendBotNotification(
       fields = [
         { name: "💳 Bot Wallet", value: `\`\`\`${walletAddress}\`\`\``, inline: false },
         { name: "🪙 Token Address", value: `\`\`\`${token}\`\`\``, inline: false },
-        { name: "💵 SOL Trade Value", value: `${tradeValueSol} SOL`, inline: false },
+        { name: "💵 Trade Value", value: `${tradeValueSol} SOL`, inline: false },
         { name: "💰 Tokens Bought", value: amount as string, inline: false },
         { name: "🔄 DEX Used", value: dex || "Jupiter Aggregator", inline: false },
         {
@@ -243,7 +244,7 @@ export async function sendBotNotification(
       break;
     case "DECREASE ALERT":
       color = 16753920;
-      title = "🟡 Decrease Alert (Bot Partial Sell)";
+      title = "🟡 Trade Completed (Bot Partial Sell)";
       fields = [
         { name: "💳 Bot Wallet", value: `\`\`\`${walletAddress}\`\`\``, inline: false },
         { name: "🪙 Token Address", value: `\`\`\`${token}\`\`\``, inline: false },
